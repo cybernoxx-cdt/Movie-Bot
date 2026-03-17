@@ -29,7 +29,7 @@
     "OWNER_NUMBER": {
       "description": "Owner Number",
       "required": true,
-      "default": "0769872326"
+      "default": "0758127752"
     },
     "ALIVE_IMG": {
       "description": "https://files.catbox.moe/gm88nn.png.",
@@ -53,7 +53,7 @@
     },
     "AUTO_READ_STATUS": {
       "description": "Auto read status (true/false)",
-      "required": false,
+      "required": true,
       "default": "true"
     },
     "ANTI_BAD_WORDS": {
@@ -68,13 +68,13 @@
     },
     "ALWAYS_ONLINE": {
       "description": "Always online feature (true/false)",
-      "required": false,
+      "required": true,
       "default": "true"
     },
     "ALWAYS_TYPING": {
       "description": "Always typing feature (true/false)",
       "required": false,
-      "default": "false"
+      "default": "true"
     },
     "ALWAYS_RECORDING": {
       "description": "Always recording feature (true/false)",
