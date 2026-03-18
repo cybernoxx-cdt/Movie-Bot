@@ -6,9 +6,9 @@ on:
       - main
   workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *' # සෑම පැය 5කටම වරක් ස්වයංක්‍රීයව පටන් ගනී
+    - cron: '0 */5 * * *' # Runs automatically every 5 hours
 
-# 🛡️ එකම වෙලාවේ Instances දෙකක් දුවන එක නවත්වන ප්‍රධානම කෑල්ල
+# 🛡️ Prevents two instances from running at the same time
 concurrency:
   group: sayura-bot-cluster
   cancel-in-progress: true
@@ -20,43 +20,78 @@ permissions:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 350 # පැය 6කට ආසන්න කාලයක්
+    timeout-minutes: 350 # ~5 hours 50 minutes
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      # ─────────────────────────────────────────
+      # 1. Setup
+      # ─────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: 20
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
 
-    - name: Install System Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg
-        sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-        sudo chmod a+rx /usr/local/bin/yt-dlp
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          sudo curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+            -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+          echo "✅ System dependencies installed"
+          ffmpeg -version | head -1
+          yt-dlp --version
 
-    - name: Install Node dependencies
-      run: npm install
+      - name: Install Node dependencies
+        run: |
+          npm ci --prefer-offline || npm install
+          echo "✅ Node dependencies ready"
 
-    - name: Start Bot
-      env:
-        MONGO_URI: ${{ secrets.MONGO_URI }}
-      run: |
-        echo "🚀 Sayura MD Bot is starting..."
-        # බොට් එක foreground එකේ රන් කරනවා, එවිට workflow එක බොට් එක්කම පණ පිටින් තියෙනවා
-        npm start
+      # ─────────────────────────────────────────
+      # 2. Bot Runtime
+      # ─────────────────────────────────────────
+      - name: Start Bot
+        id: bot_run
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          NODE_ENV: production
+        run: |
+          echo "🚀 Sayura MD Bot is starting..."
+          echo "🕐 Start time: $(date -u)"
 
-    - name: Auto Restart Workflow
-      if: always()
-      env:
-        GH_TOKEN: ${{ secrets.GH_TOKEN }}
-      run: |
-        echo "🔄 Restarting workflow to keep bot alive..."
-        curl -X POST \
-        -H "Accept: application/vnd.github+json" \
-        -H "Authorization: Bearer $GH_TOKEN" \
-        https://api.github.com/repos/${{ github.repository }}/actions/workflows/node.yml/dispatches \
-        -d '{"ref":"main"}'
+          # Run bot in foreground so workflow stays alive with it
+          npm start
+          EXIT_CODE=$?
+
+          echo "🔴 Bot stopped with exit code: $EXIT_CODE"
+          echo "🕐 Stop time: $(date -u)"
+          exit $EXIT_CODE
+
+      # ─────────────────────────────────────────
+      # 3. Auto-Restart (always runs, even on failure)
+      # ─────────────────────────────────────────
+      - name: Auto-restart workflow
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          echo "🔄 Scheduling next run to keep bot alive..."
+
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/node.yml/dispatches \
+            -d '{"ref":"main"}')
+
+          if [ "$HTTP_STATUS" -eq 204 ]; then
+            echo "✅ Workflow restart triggered successfully (HTTP $HTTP_STATUS)"
+          else
+            echo "⚠️  Restart trigger returned HTTP $HTTP_STATUS — check GH_TOKEN permissions"
+            exit 1
+          fi
